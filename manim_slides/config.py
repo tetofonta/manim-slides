@@ -194,14 +194,15 @@ class SlideConfig(BaseModel):  # type: ignore[misc]
 
     @classmethod
     def from_pre_slide_config_and_files(
-        cls, pre_slide_config: PreSlideConfig, file: Path, rev_file: Path, notes: str
+        cls, pre_slide_config: PreSlideConfig, file: Path, rev_file: Path, thumbnail: Path, notes: str
     ) -> "SlideConfig":
         return cls(
             file=file,
             rev_file=rev_file,
             loop=pre_slide_config.loop,
             auto_next=pre_slide_config.auto_next,
-            notes=notes
+            notes=notes,
+            thumbnail=thumbnail
         )
 
 

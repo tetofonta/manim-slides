@@ -64,8 +64,22 @@ def merge_basenames(files: List[Path]) -> Path:
 
 
 def reverse_video_file(ffmpeg_bin: Path, src: Path, dst: Path) -> None:
-    """Reverses a video file, writting the result to `dst`."""
+    """Reverses a video file, writing the result to `dst`."""
     command = [str(ffmpeg_bin), "-y", "-i", str(src), "-vf", "reverse", str(dst)]
+    logger.debug(" ".join(command))
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    output, error = process.communicate()
+
+    if output:
+        logger.debug(output.decode())
+
+    if error:
+        logger.debug(error.decode())
+
+
+def generate_slide_thumbnail(ffmpeg_bin: Path, src: Path, dst: Path):
+    """Gets the last frame of a video file, writing the result to `dst`."""
+    command = [str(ffmpeg_bin), "-sseof", "-1", "-i", str(src), "-update", "1", "-q:v", "1", str(dst)]
     logger.debug(" ".join(command))
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output, error = process.communicate()

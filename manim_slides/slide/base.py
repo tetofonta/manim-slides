@@ -12,7 +12,7 @@ from tqdm import tqdm
 from ..config import PresentationConfig, PreSlideConfig, SlideConfig
 from ..defaults import FFMPEG_BIN, FOLDER_PATH
 from ..logger import logger
-from ..utils import concatenate_video_files, merge_basenames, reverse_video_file
+from ..utils import concatenate_video_files, merge_basenames, reverse_video_file, generate_slide_thumbnail
 from . import MANIM
 
 if MANIM:
@@ -436,6 +436,7 @@ class BaseSlide:
             file = merge_basenames(slide_files)
             dst_file = scene_files_folder / file.name
             rev_file = scene_files_folder / f"{file.stem}_reversed{file.suffix}"
+            thumbnail_file = scene_files_folder / f"{file.stem}_thumb.png"
 
             # We only concat animations if it was not present
             if not use_cache or not dst_file.exists():
@@ -445,14 +446,18 @@ class BaseSlide:
             if not use_cache or not rev_file.exists():
                 reverse_video_file(self._ffmpeg_bin, dst_file, rev_file)
 
+            # We generate the slide thumbnail from the last frame
+            if not use_cache or not thumbnail_file.exists():
+                generate_slide_thumbnail(self._ffmpeg_bin, dst_file, thumbnail_file)
+
             # We generate the note text based on the full slide notes in the doc
             note = notes[0]
             if len(notes) > i + 1:
-                note += "\n\n=====\n\n" + notes[i+1]
+                note += "\n\n=====\n\n" + notes[i + 1]
 
             slides.append(
                 SlideConfig.from_pre_slide_config_and_files(
-                    pre_slide_config, dst_file, rev_file,
+                    pre_slide_config, dst_file, rev_file, thumbnail_file,
                     note.strip()
                 )
             )

@@ -1,3 +1,4 @@
+import json
 import signal
 import sys
 from pathlib import Path
@@ -225,6 +226,14 @@ def start_at_callback(
     is_flag=True,
     help="If set, pressing next will turn any looping slide into a play slide.",
 )
+@click.option(
+    "--presentation-file",
+    "-P",
+    "presentation_file",
+    metavar="FILE",
+    default=None,
+    help="If set the the slide order will be read from the presentation file passed",
+)
 @click.help_option("-h", "--help")
 @verbosity_option
 def present(
@@ -243,6 +252,7 @@ def present(
     screen_number: Optional[int],
     playback_rate: float,
     next_terminates_loop: bool,
+    presentation_file: str
 ) -> None:
     """
     Present SCENE(s), one at a time, in order.
@@ -257,6 +267,12 @@ def present(
     """
     if skip_all:
         exit_after_last_slide = True
+
+    if presentation_file:
+        with open(presentation_file) as p:
+            presentation = json.loads(p.read())
+            folder = Path(presentation.get("root", "./slides"))
+            scenes = presentation.get("sequence", [])
 
     presentation_configs = get_scenes_presentation_config(scenes, folder)
 

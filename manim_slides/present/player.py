@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent, QScreen
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QMainWindow
+from PySide6.QtWidgets import QMdiSubWindow, QGridLayout, QLabel, QMainWindow, QWidget
 
 from ..config import Config, PresentationConfig, SlideConfig
 from ..logger import logger
@@ -13,9 +13,8 @@ from ..resources import *  # noqa: F403
 
 WINDOW_NAME = "Manim Slides"
 
-
-class Info(QDialog):  # type: ignore[misc]
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+class InfoWindow(QWidget):
+    def __init__(self, *args: Any, presentation, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
         layout = QGridLayout()
@@ -30,9 +29,23 @@ class Info(QDialog):  # type: ignore[misc]
         self.setFixedWidth(150)
         self.setFixedHeight(80)
 
-        if parent := self.parent():
+
+class Info(QMdiSubWindow):  # type: ignore[misc]
+    def __init__(self, *args: Any, presentation, presenter_screen, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.window = InfoWindow(presentation=presentation)
+        self.setWidget(self.window)
+
+        if presenter_screen is not None:
+            self.setScreen(presenter_screen)
+            self.move(presenter_screen.geometry().center())
+
+        if parent := presentation:
             self.closeEvent = parent.closeEvent
             self.keyPressEvent = parent.keyPressEvent
+
+
 
 
 class Player(QMainWindow):  # type: ignore[misc]
@@ -53,6 +66,7 @@ class Player(QMainWindow):  # type: ignore[misc]
         presentation_index: int = 0,
         slide_index: int = 0,
         screen: Optional[QScreen] = None,
+        presenter_screen: Optional[QScreen] = None,
         playback_rate: float = 1.0,
         next_terminates_loop: bool = False,
     ):
@@ -108,7 +122,8 @@ class Player(QMainWindow):  # type: ignore[misc]
         self.presentation_changed.connect(self.presentation_changed_callback)
         self.slide_changed.connect(self.slide_changed_callback)
 
-        self.info = Info(parent=self)
+        self.presenter_window = Info(presentation=self, presenter_screen=screen)
+        self.info = self.presenter_window.window
 
         # Connecting key callbacks
 
@@ -161,7 +176,6 @@ class Player(QMainWindow):  # type: ignore[misc]
     """
     Properties
     """
-
     @property
     def presentations_count(self) -> int:
         return len(self.presentation_configs)
@@ -292,12 +306,18 @@ class Player(QMainWindow):  # type: ignore[misc]
 
     @Slot()
     def presentation_changed_callback(self) -> None:
+        self.activateWindow()
+        self.raise_()
+        self.setFocus()
         index = self.current_presentation_index
         count = self.presentations_count
         self.info.scene_label.setText(f"{index+1:4d}/{count:4<d}")
 
     @Slot()
     def slide_changed_callback(self) -> None:
+        self.activateWindow()
+        self.raise_()
+        self.setFocus()
         index = self.current_slide_index
         count = self.current_slides_count
         self.info.slide_label.setText(f"{index+1:4d}/{count:4<d}")

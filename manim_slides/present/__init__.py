@@ -137,6 +137,20 @@ def start_at_callback(
     )
 
 
+def get_screen(app, number: Optional[int]):
+    if number is None:
+        return None
+
+    try:
+        return app.screens()[number]
+    except IndexError:
+        logger.error(
+            f"Invalid screen number {number}, "
+            f"allowed values are from 0 to {len(app.screens()) - 1} (incl.)"
+        )
+        return None
+
+
 @click.command()
 @click.argument("scenes", nargs=-1)
 @config_path_option
@@ -214,6 +228,15 @@ def start_at_callback(
     help="Present content on the given screen (a.k.a. display).",
 )
 @click.option(
+    "-s",
+    "--presenter-screen",
+    "presenter_screen_number",
+    metavar="NUMBER",
+    type=int,
+    default=None,
+    help="Screen where to display the presenter window",
+)
+@click.option(
     "--playback-rate",
     metavar="RATE",
     type=float,
@@ -252,7 +275,8 @@ def present(
     screen_number: Optional[int],
     playback_rate: float,
     next_terminates_loop: bool,
-    presentation_file: str
+    presentation_file: str,
+    presenter_screen_number: Optional[int]
 ) -> None:
     """
     Present SCENE(s), one at a time, in order.
@@ -294,17 +318,8 @@ def present(
     app = qapp()
     app.setApplicationName("Manim Slides")
 
-    if screen_number is not None:
-        try:
-            screen = app.screens()[screen_number]
-        except IndexError:
-            logger.error(
-                f"Invalid screen number {screen_number}, "
-                f"allowed values are from 0 to {len(app.screens())-1} (incl.)"
-            )
-            screen = None
-    else:
-        screen = None
+    screen = get_screen(app, screen_number)
+    presenter_screen = get_screen(app, presenter_screen_number)
 
     player = Player(
         config,
@@ -318,6 +333,7 @@ def present(
         presentation_index=start_at_scene_number,
         slide_index=start_at_slide_number,
         screen=screen,
+        presenter_screen=presenter_screen,
         playback_rate=playback_rate,
         next_terminates_loop=next_terminates_loop,
     )

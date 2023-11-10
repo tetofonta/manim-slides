@@ -189,17 +189,19 @@ class SlideConfig(BaseModel):  # type: ignore[misc]
     file: FilePath
     rev_file: FilePath
     loop: bool = False
-    auto_next: bool = False
+    auto_next: bool = False,
+    notes: str = ""
 
     @classmethod
     def from_pre_slide_config_and_files(
-        cls, pre_slide_config: PreSlideConfig, file: Path, rev_file: Path
+        cls, pre_slide_config: PreSlideConfig, file: Path, rev_file: Path, notes: str
     ) -> "SlideConfig":
         return cls(
             file=file,
             rev_file=rev_file,
             loop=pre_slide_config.loop,
             auto_next=pre_slide_config.auto_next,
+            notes=notes
         )
 
 

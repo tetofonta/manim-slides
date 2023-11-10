@@ -1,6 +1,7 @@
 __all__ = ["BaseSlide"]
 
 import platform
+import re
 from abc import abstractmethod
 from pathlib import Path
 from typing import Any, List, MutableMapping, Optional, Sequence, Tuple, ValuesView
@@ -24,7 +25,7 @@ LEFT: np.ndarray = np.array([-1.0, 0.0, 0.0])
 
 class BaseSlide:
     def __init__(
-        self, *args: Any, output_folder: Path = FOLDER_PATH, **kwargs: Any
+            self, *args: Any, output_folder: Path = FOLDER_PATH, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
         self._output_folder: Path = output_folder
@@ -253,7 +254,7 @@ class BaseSlide:
         self._current_animation += 1
 
     def next_slide(
-        self, *, loop: bool = False, auto_next: bool = False, **kwargs: Any
+            self, *, loop: bool = False, auto_next: bool = False, **kwargs: Any
     ) -> None:
         """
         Create a new slide with previous animations, and setup options
@@ -379,8 +380,8 @@ class BaseSlide:
     def _add_last_slide(self) -> None:
         """Add a 'last' slide to the end of slides."""
         if (
-            len(self._slides) > 0
-            and self._current_animation == self._slides[-1].end_animation
+                len(self._slides) > 0
+                and self._current_animation == self._slides[-1].end_animation
         ):
             return
 
@@ -420,13 +421,16 @@ class BaseSlide:
 
         slides: List[SlideConfig] = []
 
-        for pre_slide_config in tqdm(
-            self._slides,
-            desc=f"Concatenating animation files to '{scene_files_folder}' and generating reversed animations",
-            leave=self._leave_progress_bar,
-            ascii=True if platform.system() == "Windows" else None,
-            disable=not self._show_progress_bar,
-        ):
+        notes = self.__doc__ if self.__doc__ is not None else ""
+        notes = [x.strip() for x in re.split("=====(=*)", notes)]
+
+        for i, pre_slide_config in enumerate(tqdm(
+                self._slides,
+                desc=f"Concatenating animation files to '{scene_files_folder}' and generating reversed animations",
+                leave=self._leave_progress_bar,
+                ascii=True if platform.system() == "Windows" else None,
+                disable=not self._show_progress_bar,
+        )):
             slide_files = files[pre_slide_config.slides_slice]
 
             file = merge_basenames(slide_files)
@@ -441,9 +445,15 @@ class BaseSlide:
             if not use_cache or not rev_file.exists():
                 reverse_video_file(self._ffmpeg_bin, dst_file, rev_file)
 
+            # We generate the note text based on the full slide notes in the doc
+            note = notes[0]
+            if len(notes) > i + 1:
+                note += "\n\n=====\n\n" + notes[i+1]
+
             slides.append(
                 SlideConfig.from_pre_slide_config_and_files(
-                    pre_slide_config, dst_file, rev_file
+                    pre_slide_config, dst_file, rev_file,
+                    note.strip()
                 )
             )
 
@@ -464,10 +474,10 @@ class BaseSlide:
         )
 
     def wipe(
-        self,
-        *args: Any,
-        direction: np.ndarray = LEFT,
-        **kwargs: Any,
+            self,
+            *args: Any,
+            direction: np.ndarray = LEFT,
+            **kwargs: Any,
     ) -> None:
         """
         Play a wipe animation that will shift all the current objects outside of the
@@ -520,9 +530,9 @@ class BaseSlide:
         self.play(animation)
 
     def zoom(
-        self,
-        *args: Any,
-        **kwargs: Any,
+            self,
+            *args: Any,
+            **kwargs: Any,
     ) -> None:
         """
         Play a zoom animation that will fade out all the current objects, and fade in

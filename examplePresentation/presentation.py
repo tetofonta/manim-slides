@@ -3,9 +3,9 @@ from manim_slides.slide.presentation import Presentation
 
 
 class MyPresentation(Presentation):
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         super().__init__(
-            *args,
+            *args, **kwargs,
             slides=[
                 ConvertExample,
                 ThreeDExample,

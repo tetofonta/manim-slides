@@ -14,6 +14,7 @@ from ..defaults import FFMPEG_BIN, FOLDER_PATH
 from ..logger import logger
 from ..utils import concatenate_video_files, merge_basenames, reverse_video_file, generate_slide_thumbnail
 from . import MANIM
+from manim import config
 
 if MANIM:
     from manim.mobject.mobject import Mobject
@@ -399,6 +400,9 @@ class BaseSlide:
 
         Note that cached files only work with Manim.
         """
+        if not config.write_to_movie:
+            return
+
         self._add_last_slide()
 
         files_folder = self._output_folder / "files"
@@ -422,7 +426,7 @@ class BaseSlide:
         slides: List[SlideConfig] = []
 
         notes = self.__doc__ if self.__doc__ is not None else ""
-        notes = [x.strip() for x in re.split("=====(=*)", notes)]
+        notes = [x.strip() for x in re.split("-----(-*)", notes)]
 
         for i, pre_slide_config in enumerate(tqdm(
                 self._slides,
@@ -453,7 +457,7 @@ class BaseSlide:
             # We generate the note text based on the full slide notes in the doc
             note = notes[0]
             if len(notes) > i + 1:
-                note += "\n\n=====\n\n" + notes[i + 1]
+                note += "\n\n" + notes[i + 1]
 
             slides.append(
                 SlideConfig.from_pre_slide_config_and_files(

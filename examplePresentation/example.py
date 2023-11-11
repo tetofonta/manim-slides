@@ -13,12 +13,14 @@ elif MANIMGL:
 class BasicExample(Slide):
     """
         This is the note section for this group of slides. The fist section will appear as a note on all the subslides
-        =====
-        Five (or more) equal signs will indicate the beginning of a new section. these are the notes for slide .1
-        =====
+        ------
+        Five (_or more_) dash `-` signs will indicate the beginning of a new section. these are the notes for slide .1
+        -------
         Slide 2
-        =====
-        and slide 3
+        -------
+        All this text **can** be written in markdown
+         - Easy of use
+         - Easy of write
     """
     def construct(self):
         circle = Circle(radius=3, color=BLUE)

@@ -426,7 +426,8 @@ class BaseSlide:
         slides: List[SlideConfig] = []
 
         notes = self.__doc__ if self.__doc__ is not None else ""
-        notes = [x.strip() for x in re.split("-----(-*)", notes)]
+        notes = [x.strip() for x in re.split("------*\n", notes)]
+        print(notes)
 
         for i, pre_slide_config in enumerate(tqdm(
                 self._slides,

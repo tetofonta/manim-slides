@@ -1,11 +1,15 @@
+import time
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent, QScreen
+from PySide6 import QtWidgets
+from PySide6.QtCore import Qt, QUrl, Signal, Slot, QMargins, QPoint
+from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent, QScreen, QPixmap, QPalette
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import QMdiSubWindow, QGridLayout, QLabel, QMainWindow, QWidget
+from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QMainWindow, QScrollArea, QVBoxLayout, QHBoxLayout, QWidget, \
+    QSizePolicy, QProgressBar, QLayout, QStatusBar, QTextEdit
+from pydantic import PositiveInt, FilePath
 
 from ..config import Config, PresentationConfig, SlideConfig
 from ..logger import logger
@@ -13,376 +17,499 @@ from ..resources import *  # noqa: F403
 
 WINDOW_NAME = "Manim Slides"
 
-class InfoWindow(QWidget):
-    def __init__(self, *args: Any, presentation, **kwargs: Any) -> None:
+
+class PresentationSlide:
+    def __init__(self, file: FilePath, rev_file: FilePath, thumbnail: FilePath, loop: bool = False,
+                 auto_next: bool = False, notes: str = ""):
+        self.thumbnail = thumbnail
+        self.file = file
+        self.rev_file = rev_file
+        self.loop = loop
+        self.auto_next = auto_next
+        self.notes = notes
+
+
+class SlideSequenceElement(QWidget):
+    def __init__(self, scroll_parent, index, slide, selected, mp, last):
+        super().__init__()
+        self.mp = mp
+        self.index = index
+        self.slide = slide
+        self.last = last
+        self.__scroll_parent = scroll_parent
+        self.__layout = QHBoxLayout()
+        self.__index_label = QLabel()
+        self.__img_label = QLabel()
+        self.__loop_label = QLabel()
+        self.__auto_play_label = QLabel()
+        self.__progress = QProgressBar()
+
+        self.__selected_palette = QPalette()
+        self.__palette = QPalette()
+        self.__selected_palette.setColor(QPalette.ColorRole.Window, Qt.GlobalColor.yellow)
+        self.__selected_palette.setColor(self.__index_label.foregroundRole(), Qt.GlobalColor.black)
+
+        self.init_gui(index, slide, selected)
+
+    def set_index(self, i):
+        self.__index_label.setText(str(i))
+
+    def set_selected(self, selected=True):
+        self.setPalette(self.__selected_palette if selected else self.__palette)
+        self.__progress.setVisible(selected)
+
+        # self.mapTo(self.parent(), QPoint(0, 0))
+        self.__scroll_parent.ensureWidgetVisible(self)
+
+    def set_position(self, perchentage):
+        self.__progress.setValue(perchentage)
+
+    def init_gui(self, i, slide, s):
+        self.setAutoFillBackground(True)
+        self.set_index(i)
+
+        indicators = QWidget()
+        vl = QVBoxLayout()
+        vl.addWidget(self.__index_label)
+
+        if slide.auto_next:
+            self.__auto_play_label.setText("A")
+
+        if slide.loop:
+            self.__auto_play_label.setText("L")
+
+        vl.addWidget(self.__loop_label)
+        vl.addWidget(self.__auto_play_label)
+        indicators.setLayout(vl)
+
+        preview = QWidget()
+        l = QVBoxLayout()
+
+        img = QPixmap(slide.thumbnail).scaledToWidth(200, Qt.TransformationMode.SmoothTransformation)
+        self.__img_label.setPixmap(img)
+
+        self.__img_label.setFixedWidth(img.width())
+        self.__img_label.setFixedHeight(img.height())
+        self.__progress.setVisible(False)
+        self.__progress.setFixedHeight(8)
+        self.__progress.setFixedWidth(img.width())
+        self.__progress.setTextVisible(False)
+
+        l.addWidget(self.__img_label)
+        l.addWidget(self.__progress)
+        l.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        l.setContentsMargins(QMargins(0, 0, 0, 0))
+        preview.setLayout(l)
+
+        self.__layout.addWidget(indicators, Qt.AlignmentFlag.AlignLeft)
+        self.__layout.addWidget(preview, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setLayout(self.__layout)
+        self.set_selected(s)
+        self.__layout.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            play_index = (self.index + (1 if not self.last else 0)) if not self.slide.loop else self.index
+            play_paused = not self.slide.loop
+            self.mp.load_slide(play_index, play_paused, False, False)
+            self.__progress.setValue(100)
+
+
+class SlideList(QScrollArea):
+    def __init__(self, *args, slides, mp, slide_index, **kwargs):
         super().__init__(*args, **kwargs)
+        self.slides = slides
+        self.active_slide = slide_index
+        self.slide_list_elements = [SlideSequenceElement(self, i, s, i == self.active_slide, mp, i == len(self.slides) - 1) for i, s in
+                                    enumerate(self.slides)]
+        self.slide_list = QWidget(self)
+        self.layout = QVBoxLayout(self.slide_list)
+        for s in self.slide_list_elements:
+            self.layout.addWidget(s)
+        self.setWidget(self.slide_list)
+        self.setFixedWidth(self.slide_list.width() + 24)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
-        layout = QGridLayout()
-        self.scene_label = QLabel()
-        self.slide_label = QLabel()
+    def set_active_slide(self, index):
+        self.slide_list_elements[self.active_slide].set_selected(False)
+        self.slide_list_elements[index].set_selected(True)
+        self.active_slide = index
 
-        layout.addWidget(QLabel("Scene:"), 1, 1)
-        layout.addWidget(QLabel("Slide:"), 2, 1)
-        layout.addWidget(self.scene_label, 1, 2)
-        layout.addWidget(self.slide_label, 2, 2)
-        self.setLayout(layout)
-        self.setFixedWidth(150)
-        self.setFixedHeight(80)
+    def slide_play_position_updated(self, index, perchentage):
+        index = max(min(index, len(self.slide_list_elements)), 0)
+        self.slide_list_elements[index].set_position(perchentage)
 
 
-class Info(QMdiSubWindow):  # type: ignore[misc]
-    def __init__(self, *args: Any, presentation, presenter_screen, **kwargs: Any) -> None:
+class SlideInfo(QWidget):
+    def __init__(self, slide, next_slide):
+        super().__init__()
+
+        self.__cur_slide_label = QLabel()
+        self.__next_slide_label = QLabel()
+        self.__cur_img = QPixmap()
+        self.__next_img = QPixmap()
+
+        self.__notes = QTextEdit()
+        self.__layout = QVBoxLayout()
+
+        self.init_gui()
+        self.set_cur_slide(slide, next_slide)
+
+    def init_gui(self):
+        self.__cur_slide_label.setPixmap(self.__cur_img)
+        self.__next_slide_label.setPixmap(self.__next_img)
+
+        top_layout = QHBoxLayout()
+        next_slide_layout = QVBoxLayout()
+        next_slide = QWidget()
+        next_slide_layout.addWidget(self.__next_slide_label)
+        next_slide.setLayout(next_slide_layout)
+
+        top_layout.addWidget(self.__cur_slide_label)
+        top_layout.addWidget(next_slide)
+
+        top = QWidget()
+        top.setLayout(top_layout)
+        self.__layout.addWidget(top)
+
+        self.__notes.setReadOnly(True)
+        self.__layout.addWidget(self.__notes)
+        self.setLayout(self.__layout)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.__notes.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def set_cur_slide(self, slide, next_slide):
+        self.__cur_img = QPixmap(slide.thumbnail).scaledToWidth(600, Qt.TransformationMode.SmoothTransformation)
+        self.__cur_slide_label.setPixmap(self.__cur_img)
+        self.__cur_slide_label.setFixedWidth(self.__cur_img.width())
+        self.__cur_slide_label.setFixedHeight(self.__cur_img.height())
+        self.__notes.setMarkdown(slide.notes)
+
+        if next_slide is None:
+            self.__next_img = QPixmap()
+            self.__next_slide_label.setPixmap(self.__next_img)
+            return
+
+        self.__next_img = QPixmap(next_slide.thumbnail).scaledToWidth(380, Qt.TransformationMode.SmoothTransformation)
+        self.__next_slide_label.setPixmap(self.__next_img)
+        self.__next_slide_label.setFixedWidth(self.__next_img.width())
+        self.__next_slide_label.setFixedHeight(self.__next_img.height())
+
+
+class Info(QMainWindow):  # type: ignore[misc]
+    def __init__(self, *args: Any, presenter_screen, slides, slide_load_signal, start_slide, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.slides = slides
+        self.slide_load_signal = slide_load_signal
+        self.slide_list_widget = SlideList(self, slides=self.slides, mp=self.parent().media_player, slide_index=start_slide)
+        self.slide_info = SlideInfo(self.slides[start_slide], self.slides[start_slide + 1] if start_slide < len(self.slides) - 1 else None)
 
-        self.window = InfoWindow(presentation=presentation)
-        self.setWidget(self.window)
+        w = QWidget()
+        self.__layout = QGridLayout(self)
+        self.__layout.addWidget(self.slide_list_widget, 0, 0)
+        self.__layout.addWidget(self.slide_info, 0, 1)
+        w.setLayout(self.__layout)
+        self.setCentralWidget(w)
+
+        self.slide_counter = QLabel()
+        self.slide_counter.setText(f"0 of {len(self.slides)}")
+
+        self.status_bar = QStatusBar(self)
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage(f"Slides: {start_slide} of {len(self.slides)}")
 
         if presenter_screen is not None:
             self.setScreen(presenter_screen)
             self.move(presenter_screen.geometry().center())
 
-        if parent := presentation:
-            self.closeEvent = parent.closeEvent
-            self.keyPressEvent = parent.keyPressEvent
+        self.slide_load_signal.connect(self.on_slide_changed)
+        self.parent().media_player.positionChanged.connect(self.position_changed)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setWindowTitle(f"{WINDOW_NAME} - Presenter View")
+        self.show()
+
+    @Slot()
+    def position_changed(self, position):
+        mp = self.parent().media_player
+        index = mp.slide_index + (1 if not mp.playingForward else 0)
+        perch = int((position / mp.duration())*100)
+        self.slide_list_widget.slide_play_position_updated(index, 100 - perch if not mp.playingForward else perch)
+
+    @Slot()
+    def on_slide_changed(self):
+        mp = self.parent().media_player
+        cur_index = mp.slide_index
+        if mp.position() == 0 and not mp.isPlaying():
+            cur_index -= 1
+
+        cur_index = max(cur_index, 0)
+
+        self.status_bar.showMessage(f"Slides: {cur_index} of {len(self.slides)}")
+        self.slide_list_widget.set_active_slide(cur_index)
+        self.slide_info.set_cur_slide(self.slides[cur_index], self.slides[cur_index + 1] if cur_index < len(self.slides) - 1 else None)
+
+    def keyPressEvent(self, arg__1):
+        self.parent().keyPressEvent(arg__1)
+
+    def closeEvent(self, arg__1):
+        self.parent().close()
 
 
+class PresentationPlayer(QMediaPlayer):
+    def __init__(self, parent, aspect_ratio_mode, playback_rate, slides: List[PresentationSlide], slide_load_signal,
+                 start_slide=0, start_paused=False, exit_after_last_slide=False):
+        super().__init__(parent)
+        self.video_player = QVideoWidget()
+        self.video_player.setAspectRatioMode(aspect_ratio_mode)
+
+        self.setVideoOutput(self.video_player)
+        self.setPlaybackRate(playback_rate)
+        self.slides = slides
+        self.slide_index = start_slide
+        self.slide_load_signal = slide_load_signal
+        self.playingForward = True
+        self.load_slide(self.slide_index, start_paused, False)
+        self.mediaStatusChanged.connect(self.media_finished)
+        self.exit_after_last_slide = exit_after_last_slide
+
+    @Slot()
+    def media_finished(self, status):
+        """Executed when a transition is finished."""
+        if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            print("Transition finished")
+
+            # If we do not need to loop then ensure no looping on the player
+            if not self.slides[self.slide_index].loop or not self.playingForward:
+                self.setLoops(1)  # do not loop anymore
+
+            # If the slide is set on auto_loop, then execute next callback if we weren't playing it in reverse.
+            if self.slides[self.slide_index].auto_next and self.playingForward:
+                return self.next()
+
+            if self.slide_index == len(self.slides) - 1 and self.exit_after_last_slide:
+                exit(0)
+
+            if not self.playingForward and self.slides[self.slide_index].loop:
+                return self.load_slide(self.slide_index, True, False)
+            self.load_slide(self.slide_index + 1, True, False)
+
+    def load_slide(self, index, paused=False, reversed=False, end=False):
+        """Loads the i-th slide and updates the internal reference index"""
+        if index >= len(self.slides):
+            print("No more slides!")
+            return
+        if index < 0:
+            print("No previous slides!")
+            return
+
+        slide = self.slides[index]
+        self.slide_index = index
+        self.playingForward = not reversed
+        print(
+            f"Slide {index} loaded, PAUSED={paused}, REVERSE={reversed}, LOOP={slide.loop}, AUTO_NEXT={slide.auto_next}")
+
+        # Load the resource
+        url = QUrl.fromLocalFile(slide.file if not reversed else slide.rev_file)
+        self.setSource(url)
+
+        # If the slide requires looping then set the looping method
+        self.setLoops(-1 if slide.loop and not reversed else 1)
+
+        if end:
+            self.setPosition(self.duration())
+
+        # If we need to prepare a slide in paused state then pause the player
+        if paused:
+            self.pause()
+        else:
+            self.play()
+        self.slide_load_signal.emit()
+
+    def next(self):
+        if self.isPlayingForward() and not self.isLooping():
+            # If we are going forward but not in a looping slide we jump to the end of the animation
+            self.pause()
+            self.setPosition(self.duration())
+            return
+
+        if self.isLooping():
+            # If we are looping we can go to the next transition without pause
+            return self.load_slide(self.slide_index + 1, False, False)
+
+        if self.isPlayingBackward():
+            # We are going from index+1 to index (index has already been decremented) so we can reset to index+1
+            return self.load_slide(self.slide_index + 1, True, False)
+
+        # We are not playing
+        if self.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia:
+            # Media has finished, start directly the next transition because no one has prepared it paused
+            return self.load_slide(self.slide_index + 1, False, False)
+
+        # We are not playing but the media is not finished.
+        if self.position() == 0:
+            # Someone has already prepared the slide for us
+            return self.load_slide(self.slide_index, False, False)
+
+        if self.position() == self.duration():
+            # No one loaded the slide for us, just do it.
+            return self.load_slide(self.slide_index + 1, False, False)
+        # Just keep playing
+        self.play()
+
+    def previous(self):
+        if self.isPlaying():
+            # If we are playing in a looping slide we will play the reverse of it from the current duration
+            if self.slides[self.slide_index].loop:
+                self.pause()
+                rev_position = self.duration() - self.position()
+                self.load_slide(self.slide_index, False, True)
+                self.setPosition(rev_position)
+                return
+
+            # Every time we are playing something we are preparing this slide going forward paused.
+            #  If we were going forward not looping, reset the transition to the beginning
+            #  If we were looping reset the slide
+            #  If we were already going backwards, skip transition and get ready for start
+            return self.load_slide(self.slide_index, True, False)
+
+        if self.slide_index > 0:
+            # We are not playing
+            if self.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia:
+                # No one has preloaded the next transition so we are free to play the reverse and decrement
+                # (if possible)
+                self.load_slide(self.slide_index, False, True)
+                self.slide_index -= 1
+                return
+
+            # Someone has already prepared the next slide and is not started. we are in reality to slide index - 1
+            self.load_slide(self.slide_index - 1, False, True)
+            self.slide_index -= 1
+        else:
+            print("no previous slide")
+
+    def get_video_player(self):
+        return self.video_player
+
+    def isLooping(self):
+        return self.isPlaying() and self.slides[self.slide_index].loop
+
+    def isPlayingForward(self):
+        return self.isPlaying() and self.playingForward
+
+    def isPlayingBackward(self):
+        return self.isPlaying() and not self.playingForward
 
 
-class Player(QMainWindow):  # type: ignore[misc]
-    presentation_changed: Signal = Signal()
-    slide_changed: Signal = Signal()
+def load_presentation(presentation_configs: List[PresentationConfig]):
+    slides = []
+    resolution = (0, 0)
+    for p in presentation_configs:
+        resolution = (max(p.resolution[0], resolution[0]), max(p.resolution[1], resolution[1]))
+        for s in p.slides:
+            slides.append(PresentationSlide(s.file, s.rev_file, s.thumbnail, s.loop, s.auto_next, s.notes))
+    return slides, resolution
+
+
+class Player(QMainWindow):
+    slide_load_signal = Signal()
 
     def __init__(
-        self,
-        config: Config,
-        presentation_configs: List[PresentationConfig],
-        *,
-        start_paused: bool = False,
-        full_screen: bool = False,
-        skip_all: bool = False,
-        exit_after_last_slide: bool = False,
-        hide_mouse: bool = False,
-        aspect_ratio_mode: Qt.AspectRatioMode = Qt.KeepAspectRatio,
-        presentation_index: int = 0,
-        slide_index: int = 0,
-        screen: Optional[QScreen] = None,
-        presenter_screen: Optional[QScreen] = None,
-        playback_rate: float = 1.0,
-        next_terminates_loop: bool = False,
+            self,
+            config: Config,
+            presentation_configs: List[PresentationConfig],
+            *,
+            start_paused: bool = False,
+            full_screen: bool = False,
+            exit_after_last_slide: bool = False,
+            hide_mouse: bool = False,
+            aspect_ratio_mode: Qt.AspectRatioMode = Qt.KeepAspectRatio,
+            slide_index: int = 0,
+            screen: Optional[QScreen] = None,
+            presenter_screen: Optional[QScreen] = None,
+            presenter_window: bool = False,
+            playback_rate: float = 1.0,
     ):
         super().__init__()
 
         # Wizard's config
-
         self.config = config
 
-        # Presentation configs
+        self.slides, self.resolution = load_presentation(presentation_configs)
+        self.setup_window(screen, full_screen, hide_mouse)
+        self.media_player = PresentationPlayer(self, aspect_ratio_mode, playback_rate, self.slides,
+                                               self.slide_load_signal,
+                                               slide_index, start_paused, exit_after_last_slide)
+        self.setCentralWidget(self.media_player.get_video_player())
 
-        self.presentation_configs = presentation_configs
-        self.__current_presentation_index = 0
-        self.__current_slide_index = 0
-
-        self.current_presentation_index = presentation_index
-        self.current_slide_index = slide_index
-
-        self.__current_file: Path = self.current_slide_config.file
-
-        self.__playing_reversed_slide = False
-
-        # Widgets
-
-        if screen:
-            self.setScreen(screen)
-            self.move(screen.geometry().topLeft())
-
-        if full_screen:
-            self.setWindowState(Qt.WindowFullScreen)
-        else:
-            w, h = self.current_presentation_config.resolution
-            geometry = self.geometry()
-            geometry.setWidth(w)
-            geometry.setHeight(h)
-            self.setGeometry(geometry)
-
-        if hide_mouse:
-            self.setCursor(Qt.BlankCursor)
-
-        self.setWindowTitle(WINDOW_NAME)
-        self.icon = QIcon(":/icon.png")
-        self.setWindowIcon(self.icon)
-
-        self.video_widget = QVideoWidget()
-        self.video_widget.setAspectRatioMode(aspect_ratio_mode)
-        self.setCentralWidget(self.video_widget)
-
-        self.media_player = QMediaPlayer(self)
-        self.media_player.setVideoOutput(self.video_widget)
-        self.media_player.setPlaybackRate(playback_rate)
-
-        self.presentation_changed.connect(self.presentation_changed_callback)
-        self.slide_changed.connect(self.slide_changed_callback)
-
-        self.presenter_window = Info(presentation=self, presenter_screen=screen)
-        self.info = self.presenter_window.window
-
-        # Connecting key callbacks
-
-        self.config.keys.QUIT.connect(self.close)
-        self.config.keys.PLAY_PAUSE.connect(self.play_pause)
         self.config.keys.NEXT.connect(self.next)
-        self.config.keys.PREVIOUS.connect(self.previous)
-        self.config.keys.REVERSE.connect(self.reverse)
-        self.config.keys.REPLAY.connect(self.replay)
-        self.config.keys.FULL_SCREEN.connect(self.full_screen)
-        self.config.keys.HIDE_MOUSE.connect(self.hide_mouse)
-
+        self.config.keys.PREVIOUS.connect(self.prev)
+        self.config.keys.FULL_SCREEN.connect(self.toggle_full_screen)
+        self.config.keys.HIDE_MOUSE.connect(self.toggle_mouse)
+        self.config.keys.PLAY_PAUSE.connect(self.toggle_play)
         self.dispatch = self.config.keys.dispatch_key_function()
 
-        # Misc
+        if presenter_window:
+            self.info = Info(parent=self, presenter_screen=presenter_screen, slides=self.slides,
+                             slide_load_signal=self.slide_load_signal, start_slide=slide_index)
 
-        self.exit_after_last_slide = exit_after_last_slide
-        self.next_terminates_loop = next_terminates_loop
+    @Slot()
+    def next(self):
+        self.raise_()
+        self.setFocus(QtCore.Qt.FocusReason.MouseFocusReason)
+        self.activateWindow()
+        self.media_player.next()
 
-        # Setting-up everything
+    @Slot()
+    def prev(self):
+        self.raise_()
+        self.setFocus(QtCore.Qt.FocusReason.MouseFocusReason)
+        self.activateWindow()
+        self.media_player.previous()
 
-        if skip_all:
-
-            def media_status_changed(status: QMediaPlayer.MediaStatus) -> None:
-                self.media_player.setLoops(1)  # Otherwise looping slides never end
-                if status == QMediaPlayer.EndOfMedia:
-                    self.load_next_slide()
-
-            self.media_player.mediaStatusChanged.connect(media_status_changed)
-
+    @Slot()
+    def toggle_full_screen(self):
+        if self.windowState() == Qt.WindowState.WindowFullScreen:
+            self.setWindowState(Qt.WindowState.WindowNoState)
         else:
+            self.setWindowState(Qt.WindowState.WindowFullScreen)
 
-            def media_status_changed(status: QMediaPlayer.MediaStatus) -> None:
-                if (
-                    status == QMediaPlayer.EndOfMedia
-                    and self.current_slide_config.auto_next
-                ):
-                    self.load_next_slide()
-
-            self.media_player.mediaStatusChanged.connect(media_status_changed)
-
-        if self.current_slide_config.loop:
-            self.media_player.setLoops(-1)
-
-        self.load_current_media(start_paused=start_paused)
-
-        self.presentation_changed.emit()
-        self.slide_changed.emit()
-
-    """
-    Properties
-    """
-    @property
-    def presentations_count(self) -> int:
-        return len(self.presentation_configs)
-
-    @property
-    def current_presentation_index(self) -> int:
-        return self.__current_presentation_index
-
-    @current_presentation_index.setter
-    def current_presentation_index(self, index: int) -> None:
-        if 0 <= index < self.presentations_count:
-            self.__current_presentation_index = index
-        elif -self.presentations_count <= index < 0:
-            self.__current_presentation_index = index + self.presentations_count
+    @Slot()
+    def toggle_mouse(self):
+        if self.cursor() == Qt.CursorShape.BlankCursor:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         else:
-            logger.warn(f"Could not set presentation index to {index}.")
-            return
+            self.setCursor(Qt.CursorShape.BlankCursor)
 
-        self.presentation_changed.emit()
-
-    @property
-    def current_presentation_config(self) -> PresentationConfig:
-        return self.presentation_configs[self.current_presentation_index]
-
-    @property
-    def current_slides_count(self) -> int:
-        return len(self.current_presentation_config.slides)
-
-    @property
-    def current_slide_index(self) -> int:
-        return self.__current_slide_index
-
-    @current_slide_index.setter
-    def current_slide_index(self, index: int) -> None:
-        if 0 <= index < self.current_slides_count:
-            self.__current_slide_index = index
-        elif -self.current_slides_count <= index < 0:
-            self.__current_slide_index = index + self.current_slides_count
-        else:
-            logger.warn(f"Could not set slide index to {index}.")
-            return
-
-        self.slide_changed.emit()
-
-    @property
-    def current_slide_config(self) -> SlideConfig:
-        return self.current_presentation_config.slides[self.current_slide_index]
-
-    @property
-    def current_file(self) -> Path:
-        return self.__current_file
-
-    @current_file.setter
-    def current_file(self, file: Path) -> None:
-        self.__current_file = file
-
-    @property
-    def playing_reversed_slide(self) -> bool:
-        return self.__playing_reversed_slide
-
-    @playing_reversed_slide.setter
-    def playing_reversed_slide(self, playing_reversed_slide: bool) -> None:
-        self.__playing_reversed_slide = playing_reversed_slide
-
-    """
-    Loading slides
-    """
-
-    def load_current_media(self, start_paused: bool = False) -> None:
-        url = QUrl.fromLocalFile(self.current_file)
-        self.media_player.setSource(url)
-
-        if start_paused:
+    def toggle_play(self):
+        if self.media_player.isPlaying():
             self.media_player.pause()
         else:
             self.media_player.play()
-
-    def load_current_slide(self) -> None:
-        slide_config = self.current_slide_config
-        self.current_file = slide_config.file
-
-        if slide_config.loop:
-            self.media_player.setLoops(-1)
-        else:
-            self.media_player.setLoops(1)
-
-        self.load_current_media()
-
-    def load_previous_slide(self) -> None:
-        self.playing_reversed_slide = False
-
-        if self.current_slide_index > 0:
-            self.current_slide_index -= 1
-        elif self.current_presentation_index > 0:
-            self.current_presentation_index -= 1
-            self.current_slide_index = self.current_slides_count - 1
-        else:
-            logger.info("No previous slide.")
-            return
-
-        self.load_current_slide()
-
-    def load_next_slide(self) -> None:
-        if self.playing_reversed_slide:
-            self.playing_reversed_slide = False
-        elif self.current_slide_index < self.current_slides_count - 1:
-            self.current_slide_index += 1
-        elif self.current_presentation_index < self.presentations_count - 1:
-            self.current_presentation_index += 1
-            self.current_slide_index = 0
-        elif self.exit_after_last_slide:
-            self.close()
-            return
-        else:
-            logger.info("No more slide to play.")
-            return
-
-        self.load_current_slide()
-
-    def load_reversed_slide(self) -> None:
-        self.playing_reversed_slide = True
-        self.current_file = self.current_slide_config.rev_file
-        self.load_current_media()
-
-    """
-    Key callbacks and slots
-    """
-
-    @Slot()
-    def presentation_changed_callback(self) -> None:
-        self.activateWindow()
-        self.raise_()
-        self.setFocus()
-        index = self.current_presentation_index
-        count = self.presentations_count
-        self.info.scene_label.setText(f"{index+1:4d}/{count:4<d}")
-
-    @Slot()
-    def slide_changed_callback(self) -> None:
-        self.activateWindow()
-        self.raise_()
-        self.setFocus()
-        index = self.current_slide_index
-        count = self.current_slides_count
-        self.info.slide_label.setText(f"{index+1:4d}/{count:4<d}")
-
-    def show(self) -> None:
-        super().show()
-        self.info.show()
-
-    @Slot()
-    def close(self) -> None:
-        logger.info("Closing gracefully...")
-        super().close()
-
-    @Slot()
-    def next(self) -> None:
-        if self.media_player.playbackState() == QMediaPlayer.PausedState:
-            self.media_player.play()
-        elif self.next_terminates_loop and self.media_player.loops() != 1:
-            position = self.media_player.position()
-            self.media_player.setLoops(1)
-            self.media_player.stop()
-            self.media_player.setPosition(position)
-            self.media_player.play()
-        else:
-            self.load_next_slide()
-
-    @Slot()
-    def previous(self) -> None:
-        self.load_previous_slide()
-
-    @Slot()
-    def reverse(self) -> None:
-        self.load_reversed_slide()
-
-    @Slot()
-    def replay(self) -> None:
-        self.media_player.setPosition(0)
-        self.media_player.play()
-
-    @Slot()
-    def play_pause(self) -> None:
-        state = self.media_player.playbackState()
-        if state == QMediaPlayer.PausedState:
-            self.media_player.play()
-        elif state == QMediaPlayer.PlayingState:
-            self.media_player.pause()
-
-    @Slot()
-    def full_screen(self) -> None:
-        if self.windowState() == Qt.WindowFullScreen:
-            self.setWindowState(Qt.WindowNoState)
-        else:
-            self.setWindowState(Qt.WindowFullScreen)
-
-    @Slot()
-    def hide_mouse(self) -> None:
-        if self.cursor().shape() == Qt.BlankCursor:
-            self.setCursor(Qt.ArrowCursor)
-        else:
-            self.setCursor(Qt.BlankCursor)
-
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
-        self.close()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         key = event.key()
         self.dispatch(key)
         event.accept()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self.close()
+
+    def setup_window(self, screen, full_screen, hide_mouse):
+        if screen:
+            self.setScreen(screen)
+            self.move(screen.geometry().topLeft())
+
+        w, h = self.resolution
+        geometry = self.geometry()
+        geometry.setWidth(w)
+        geometry.setHeight(h)
+        self.setGeometry(geometry)
+        if full_screen:
+            self.toggle_full_screen()
+
+        if hide_mouse:
+            self.toggle_mouse()
+
+        self.setWindowTitle(WINDOW_NAME)
+        self.setWindowIcon(QIcon(":/icon.png"))

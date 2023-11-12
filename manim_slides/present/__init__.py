@@ -165,13 +165,6 @@ def get_screen(app, number: Optional[int]):
     help="Toggle full screen mode.",
 )
 @click.option(
-    "-s",
-    "--skip-all",
-    is_flag=True,
-    help="Skip all slides, useful the test if slides are working. "
-    "Automatically sets `--exit-after-last-slide` to True.",
-)
-@click.option(
     "--exit-after-last-slide",
     is_flag=True,
     help="At the end of last slide, the application will be exited.",
@@ -237,17 +230,18 @@ def get_screen(app, number: Optional[int]):
     help="Screen where to display the presenter window",
 )
 @click.option(
+    "-p",
+    "--presenter-window",
+    "presenter_window",
+    is_flag=True,
+    help="Display presenter window",
+)
+@click.option(
     "--playback-rate",
     metavar="RATE",
     type=float,
     default=1.0,
     help="Playback rate of the video slides, see PySide6 docs for details.",
-)
-@click.option(
-    "--next-terminates-loop",
-    "next_terminates_loop",
-    is_flag=True,
-    help="If set, pressing next will turn any looping slide into a play slide.",
 )
 @click.option(
     "--presentation-file",
@@ -265,7 +259,6 @@ def present(
     folder: Path,
     start_paused: bool,
     full_screen: bool,
-    skip_all: bool,
     exit_after_last_slide: bool,
     hide_mouse: bool,
     aspect_ratio: str,
@@ -274,9 +267,9 @@ def present(
     start_at_slide_number: int,
     screen_number: Optional[int],
     playback_rate: float,
-    next_terminates_loop: bool,
     presentation_file: str,
-    presenter_screen_number: Optional[int]
+    presenter_screen_number: Optional[int],
+    presenter_window: bool
 ) -> None:
     """
     Present SCENE(s), one at a time, in order.
@@ -289,8 +282,6 @@ def present(
     Use ``manim-slide list-scenes`` to list all available
     scenes in a given folder.
     """
-    if skip_all:
-        exit_after_last_slide = True
 
     if presentation_file:
         with open(presentation_file) as p:
@@ -315,6 +306,11 @@ def present(
     if start_at[1]:
         start_at_slide_number = start_at[1]
 
+    slide_index = start_at_slide_number + sum([len(x.slides) for x in presentation_configs[:start_at_scene_number]])
+    if slide_index < 0:
+        logger.error("First slide is number 0")
+        exit(2)
+
     app = qapp()
     app.setApplicationName("Manim Slides")
 
@@ -326,16 +322,14 @@ def present(
         presentation_configs,
         start_paused=start_paused,
         full_screen=full_screen,
-        skip_all=skip_all,
         exit_after_last_slide=exit_after_last_slide,
         hide_mouse=hide_mouse,
         aspect_ratio_mode=ASPECT_RATIO_MODES[aspect_ratio],
-        presentation_index=start_at_scene_number,
-        slide_index=start_at_slide_number,
+        slide_index=slide_index,
         screen=screen,
         presenter_screen=presenter_screen,
         playback_rate=playback_rate,
-        next_terminates_loop=next_terminates_loop,
+        presenter_window=presenter_window
     )
 
     player.show()

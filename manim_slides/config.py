@@ -74,8 +74,8 @@ class Keys(BaseModel):  # type: ignore[misc]
     PLAY_PAUSE: Key = Key(ids=[Qt.Key_Space], name="PLAY / PAUSE")
     NEXT: Key = Key(ids=[Qt.Key_Right], name="NEXT")
     PREVIOUS: Key = Key(ids=[Qt.Key_Left], name="PREVIOUS")
-    REVERSE: Key = Key(ids=[Qt.Key_V], name="REVERSE")
-    REPLAY: Key = Key(ids=[Qt.Key_R], name="REPLAY")
+    # REVERSE: Key = Key(ids=[Qt.Key_V], name="REVERSE")
+    # REPLAY: Key = Key(ids=[Qt.Key_R], name="REPLAY")
     FULL_SCREEN: Key = Key(ids=[Qt.Key_F], name="TOGGLE FULL SCREEN")
     HIDE_MOUSE: Key = Key(ids=[Qt.Key_H], name="HIDE / SHOW MOUSE")
 
@@ -188,6 +188,7 @@ class PreSlideConfig(BaseModel):  # type: ignore
 class SlideConfig(BaseModel):  # type: ignore[misc]
     file: FilePath
     rev_file: FilePath
+    thumbnail: FilePath
     loop: bool = False
     auto_next: bool = False,
     notes: str = ""

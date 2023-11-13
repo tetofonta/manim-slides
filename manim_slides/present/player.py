@@ -1,15 +1,16 @@
 from typing import Any, List, Optional
-from PySide6.QtCore import Qt, QUrl, Signal, Slot, QMargins
-from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent, QScreen, QPixmap, QPalette
+from PySide6.QtCore import Qt, QUrl, Signal, Slot, QMargins, QTimer
+from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent, QScreen, QPixmap, QPalette, QAction, QFont
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QGridLayout, QLabel, QMainWindow, QScrollArea, QVBoxLayout, QHBoxLayout, QWidget, \
-    QProgressBar, QLayout, QStatusBar, QTextEdit
+    QProgressBar, QLayout, QStatusBar, QTextEdit, QMenuBar, QMenu, QInputDialog, QLineEdit
 from pydantic import FilePath
 
 from ..config import Config, PresentationConfig
 from ..logger import logger
 from ..resources import *  # noqa: F403
+from ..wizard import init
 
 WINDOW_NAME = "Manim Slides"
 
@@ -140,15 +141,70 @@ class SlideList(QScrollArea):
         self.slide_list_elements[index].set_position(perchentage)
 
 
+class Timer(QLabel):
+    def __init__(self, start_paused):
+        super().__init__()
+        self.setText("00:00:00")
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(48)
+        self.setFont(font)
+
+        self.__timer = QTimer(self)
+        self.__timer.timeout.connect(self.tick)
+        self.time = (0, 0, 0)
+        self.reset()
+
+        if not start_paused:
+            self.start()
+        else:
+            self.pause()
+
+    def start(self):
+        self.__timer.start()
+
+    def pause(self):
+        self.__timer.stop()
+
+    def reset(self):
+        self.__timer.stop()
+        self.time = (0, 0, 0)
+        self.update()
+        self.__timer.setInterval(1000)
+        self.__timer.start()
+
+    def update(self):
+        self.setText("{:02d}:{:02d}:{:02d}".format(*self.time))
+
+    def toggle(self):
+        if self.__timer.isActive():
+            self.pause()
+        else:
+            self.start()
+
+    @Slot()
+    def tick(self):
+        h, m, s = self.time
+        s += 1
+        if s == 60:
+            s = 0
+            m += 1
+        if m == 60:
+            m = 0
+            h += 1
+        self.time = (h, m, s)
+        self.update()
+
+
 class SlideInfo(QWidget):
-    def __init__(self, slide, next_slide):
+    def __init__(self, slide, next_slide, start_paused):
         super().__init__()
 
         self.__cur_slide_label = QLabel()
         self.__next_slide_label = QLabel()
         self.__cur_img = QPixmap()
         self.__next_img = QPixmap()
-
+        self.timer = Timer(start_paused)
         self.__notes = QTextEdit()
         self.__layout = QVBoxLayout()
 
@@ -163,6 +219,8 @@ class SlideInfo(QWidget):
         next_slide_layout = QVBoxLayout()
         next_slide = QWidget()
         next_slide_layout.addWidget(self.__next_slide_label)
+        next_slide_layout.addWidget(self.timer)
+        self.timer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         next_slide.setLayout(next_slide_layout)
 
         top_layout.addWidget(self.__cur_slide_label)
@@ -197,17 +255,20 @@ class SlideInfo(QWidget):
 
 
 class Info(QMainWindow):  # type: ignore[misc]
-    def __init__(self, *args: Any, presenter_screen, slides, slide_load_signal, start_slide, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, config, presenter_screen, slides, slide_load_signal, start_slide, start_paused,
+                 **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.slides = slides
+        self.config = config
         self.slide_load_signal = slide_load_signal
         self.slide_list_widget = SlideList(self, slides=self.slides, mp=self.parent().media_player,
                                            slide_index=start_slide)
         self.slide_info = SlideInfo(self.slides[start_slide],
-                                    self.slides[start_slide + 1] if start_slide < len(self.slides) - 1 else None)
+                                    self.slides[start_slide + 1] if start_slide < len(self.slides) - 1 else None,
+                                    start_paused)
 
         w = QWidget()
-        self.__layout = QGridLayout(self)
+        self.__layout = QGridLayout()
         self.__layout.addWidget(self.slide_list_widget, 0, 0)
         self.__layout.addWidget(self.slide_info, 0, 1)
         w.setLayout(self.__layout)
@@ -227,8 +288,67 @@ class Info(QMainWindow):  # type: ignore[misc]
         self.slide_load_signal.connect(self.on_slide_changed)
         self.parent().media_player.positionChanged.connect(self.position_changed)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.build_menu()
         self.setWindowTitle(f"{WINDOW_NAME} - Presenter View")
         self.show()
+
+    def build_menu(self):
+        menu_bar = QMenuBar()
+        menu_bar.addMenu(self.build_presentation_menu())
+        menu_bar.addMenu(self.build_playback_menu())
+        menu_bar.addMenu(self.build_timer_menu())
+        self.setMenuBar(menu_bar)
+
+    def set_pb_speed_from_input(self):
+        new_speed, result = QInputDialog().getDouble(
+            self,
+            "Please insert the playback speed multiplier",
+            "Playback multiplier",
+            self.parent().media_player.playbackRate(), 0.01)
+        if result:
+            self.parent().media_player.setPlaybackRate(new_speed)
+
+    def build_presentation_menu(self):
+        presentation_menu = QMenu("Presentation")
+        for text, tip, action in [
+            ("Toggle Fullscreen", "Switch fullscreen mode", lambda: self.parent().toggle_full_screen()),
+            ("Toggle Mouse", "Hides or shows the mouse on the presentation window",
+             lambda: self.parent().toggle_mouse()),
+            ("Blank Screen", "Blanks the screen until a next or a play command is issued",
+             lambda: self.parent().media_player.setVisible(False))
+        ]:
+            a = QAction(text, parent=presentation_menu)
+            a.setToolTip(tip)
+            a.triggered.connect(action)
+            presentation_menu.addAction(a)
+
+        return presentation_menu
+
+    def build_playback_menu(self):
+        playback_menu = QMenu("Playback")
+        for text, tip, action in [
+            ("Playback speed...", "Opens the playback speed dialog", lambda: self.set_pb_speed_from_input()),
+            ("Play/Pause", "Start or stops the reproduction of the current transition if one is playing",
+             lambda: self.parent().toggle_play()),
+            ("Next slide", "Starts the transition to the next slide or, if it is already playing, ends it.",
+             lambda: self.parent().next()),
+            ("Previous slide", "Starts the transition in reverse or, if it is already playing, ends it.",
+             lambda: self.parent().prev())
+        ]:
+            a = QAction(text, parent=playback_menu)
+            a.setToolTip(tip)
+            a.triggered.connect(action)
+            playback_menu.addAction(a)
+        return playback_menu
+
+    def build_timer_menu(self):
+        timer_menu = QMenu("Time")
+        for text, action in [("Start/Stop timer", lambda: self.slide_info.timer.toggle()),
+                             ("Reset timer", lambda: self.slide_info.timer.reset())]:
+            a = QAction(text, parent=timer_menu)
+            a.triggered.connect(action)
+            timer_menu.addAction(a)
+        return timer_menu
 
     @Slot()
     def position_changed(self, position):
@@ -263,7 +383,6 @@ class PresentationPlayer(QMediaPlayer):
         super().__init__(parent)
         self.video_player = QVideoWidget()
         self.video_player.setAspectRatioMode(aspect_ratio_mode)
-
         self.setVideoOutput(self.video_player)
         self.setPlaybackRate(playback_rate)
         self.slides = slides
@@ -399,6 +518,9 @@ class PresentationPlayer(QMediaPlayer):
     def isPlayingBackward(self):
         return self.isPlaying() and not self.playingForward
 
+    def setVisible(self, visible):
+        self.video_player.setVisible(visible)
+
 
 def load_presentation(presentation_configs: List[PresentationConfig]):
     slides = []
@@ -449,14 +571,16 @@ class Player(QMainWindow):
         self.dispatch = self.config.keys.dispatch_key_function()
 
         if presenter_window:
-            self.info = Info(parent=self, presenter_screen=presenter_screen, slides=self.slides,
-                             slide_load_signal=self.slide_load_signal, start_slide=slide_index)
+            self.info = Info(parent=self, config=self.config, presenter_screen=presenter_screen, slides=self.slides,
+                             slide_load_signal=self.slide_load_signal, start_slide=slide_index,
+                             start_paused=start_paused)
 
     @Slot()
     def next(self):
         self.raise_()
         self.setFocus(QtCore.Qt.FocusReason.MouseFocusReason)
         self.activateWindow()
+        self.media_player.setVisible(True)
         self.media_player.next()
 
     @Slot()
@@ -485,6 +609,7 @@ class Player(QMainWindow):
             self.media_player.pause()
         else:
             self.media_player.play()
+            self.media_player.setVisible(True)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         key = event.key()

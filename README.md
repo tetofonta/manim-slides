@@ -87,6 +87,11 @@ Using Manim Slides is a two-step process:
 
 The documentation is available [online](https://eertmans.be/manim-slides/).
 
+### Note for wayland users
+
+It may happen that the presentation player won't work when in fullscreen mode and will simply block the transition requiring a restart.
+An easy way of resolving this issue is to force Qt to use xwayland for rendering the window by setting the environment variable `QT_QPA_PLATFORM=xcb`
+
 ### Basic Example
 
 Call `self.next_slide()` everytime you want to create a pause between

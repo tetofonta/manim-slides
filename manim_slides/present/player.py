@@ -595,7 +595,7 @@ class Player(QMainWindow):
         if self.windowState() == Qt.WindowState.WindowFullScreen:
             self.setWindowState(Qt.WindowState.WindowNoState)
         else:
-            self.setWindowState(Qt.WindowState.WindowFullScreen)
+            self.setWindowState(self.windowState() ^ Qt.WindowState.WindowFullScreen)
 
     @Slot()
     def toggle_mouse(self):

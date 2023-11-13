@@ -4,7 +4,7 @@ from PySide6.QtGui import QCloseEvent, QIcon, QKeyEvent, QScreen, QPixmap, QPale
 from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QGridLayout, QLabel, QMainWindow, QScrollArea, QVBoxLayout, QHBoxLayout, QWidget, \
-    QProgressBar, QLayout, QStatusBar, QTextEdit, QMenuBar, QMenu, QInputDialog, QLineEdit
+    QProgressBar, QLayout, QStatusBar, QTextEdit, QMenuBar, QMenu, QInputDialog, QLineEdit, QMdiSubWindow
 from pydantic import FilePath
 
 from ..config import Config, PresentationConfig
